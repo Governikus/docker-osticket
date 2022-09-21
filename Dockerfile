@@ -1,27 +1,29 @@
 # Deployment doesn't work on Alpine
-FROM php:7.3-cli AS deployer
-ENV OSTICKET_VERSION=1.14.3
+FROM php:8.0-cli AS deployer
+ENV OSTICKET_VERSION=1.16.3
 RUN set -x \
     && apt-get update \
     && apt-get install -y git-core \
     && git clone -b v${OSTICKET_VERSION} --depth 1 https://github.com/osTicket/osTicket.git \
     && cd osTicket \
     && php manage.php deploy -sv /data/upload \
-    # www-data is uid:gid 82:82 in php:7.0-fpm-alpine
+    && mkdir /data/upload/images/attachments \
     && chown -R 82:82 /data/upload \
     # Hide setup
     && mv /data/upload/setup /data/upload/setup_hidden \
     && chown -R root:root /data/upload/setup_hidden \
     && chmod -R go= /data/upload/setup_hidden
 
-FROM php:7.3-fpm-alpine
-MAINTAINER Martin Campbell <martin@campbellsoftware.co.uk>
+FROM php:8.0-fpm-alpine
+MAINTAINER Martin Campbell <martin@campbellsoftware.co.uk>.
 # environment for osticket
 ENV HOME=/data
 # setup workdir
 WORKDIR /data
 COPY --from=deployer /data/upload upload
+
 RUN set -x && \
+    # requirements and PHP extensions
     # requirements and PHP extensions
     apk add --no-cache --update \
         wget \
@@ -35,7 +37,9 @@ RUN set -x && \
         libintl \
         libxml2 \
         icu \
-        openssl && \
+        openssl \
+        libzip-dev \
+        zip && \
     apk add --no-cache --virtual .build-deps \
         imap-dev \
         libpng-dev \
@@ -48,9 +52,12 @@ RUN set -x && \
         g++ \
         make \
         pcre-dev && \
-    docker-php-ext-install gd curl ldap mysqli sockets gettext mbstring xml intl opcache && \
+    docker-php-ext-install gd curl ldap mysqli sockets gettext xml intl opcache && \
     docker-php-ext-configure imap --with-imap-ssl && \
     docker-php-ext-install imap && \
+    docker-php-ext-configure zip && \
+    docker-php-ext-install zip && \
+    docker-php-ext-install pdo pdo_mysql && \
     pecl install apcu && docker-php-ext-enable apcu && \
     apk del .build-deps && \
     rm -rf /var/cache/apk/* && \
@@ -71,6 +78,6 @@ RUN set -x && \
     mkdir -p /var/tmp/nginx && \
     chown nginx:www-data /var/tmp/nginx && chmod g+rx /var/tmp/nginx
 COPY files/ /
-VOLUME ["/data/upload/include/plugins","/data/upload/include/i18n","/var/log/nginx"]
+VOLUME ["/data/upload/include/plugins","/data/upload/include/i18n","/var/log/nginx","/data/upload/images/attachments"]
 EXPOSE 80
 CMD ["/data/bin/start.sh"]
